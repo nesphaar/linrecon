@@ -9,6 +9,7 @@ shopt -s nullglob
 # - Read-only: no modifica configuracion, solo consulta
 # - Recomendado: correr como root para mayor cobertura
 # - Al final: comprime todo en .zip (si existe) o .tar.gz (fallback)
+# - Progreso: muestra % y se pisa en la misma linea
 # ------------------------------------------------------------
 
 PROG="linrecon"
@@ -25,7 +26,32 @@ mkdir -p "$DATADIR"
 is_root=0
 if [ "${EUID:-$(id -u)}" -eq 0 ]; then is_root=1; fi
 
-log(){ echo "[$(date +%F' '%T)] $*" | tee -a "$TXT" >/dev/null; }
+# ------------------------------------------------------------
+# Progreso (se pisa)
+# Ajusta TOTAL_STEPS si agregas o sacas progress()
+# ------------------------------------------------------------
+
+TOTAL_STEPS=12
+CURRENT_STEP=0
+
+progress(){
+local msg="$1"
+CURRENT_STEP=$((CURRENT_STEP + 1))
+local percent=$((CURRENT_STEP * 100 / TOTAL_STEPS))
+printf "\r[%3s%%] %s" "$percent" "$msg" >&2
+}
+
+progress_done(){
+printf "\n" >&2
+}
+
+# ------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------
+
+# log(): solo al TXT para no interferir con la linea de progreso
+log(){ echo "[$(date +%F' '%T)] $*" >> "$TXT"; }
+
 cmd_exists(){ command -v "$1" >/dev/null 2>&1; }
 
 safe_cat(){
@@ -109,7 +135,9 @@ echo >> "$TXT"
 # 0x - Sistema base
 # ------------------------------------------------------------
 
+progress "Relevando sistema base"
 log "Relevando sistema base..."
+
 run_shell "00_os_release" 'safe_cat /etc/os-release'
 run "01_uname" uname -a
 run "02_uptime" uptime
@@ -122,7 +150,9 @@ if cmd_exists timedatectl; then run "06_timedatectl" timedatectl; fi
 # 1x - Hardware y almacenamiento
 # ------------------------------------------------------------
 
+progress "Relevando hardware y almacenamiento"
 log "Hardware y recursos..."
+
 run_shell "10_cpu" 'lscpu 2>/dev/null || safe_cat /proc/cpuinfo'
 run_shell "11_mem" 'free -h 2>/dev/null || safe_cat /proc/meminfo'
 run_shell "12_load" 'cat /proc/loadavg 2>/dev/null || true'
@@ -143,7 +173,9 @@ fi
 # 3x - Kernel y tuning
 # ------------------------------------------------------------
 
+progress "Relevando kernel, modulos y sysctl"
 log "Kernel, modulos, sysctl..."
+
 run_shell "30_kernel_cmdline" 'safe_cat /proc/cmdline'
 if cmd_exists sysctl; then run "31_sysctl_all" sysctl -a; fi
 if cmd_exists lsmod; then run "32_lsmod" lsmod; fi
@@ -153,25 +185,31 @@ if cmd_exists modinfo; then run_shell "33_modinfo_netfilter" 'modinfo nf_tables 
 # 4x - Red
 # ------------------------------------------------------------
 
+progress "Relevando red, rutas, DNS y puertos"
 log "Red, interfaces, rutas, DNS..."
+
 if cmd_exists ip; then
 run "40_ip_addr" ip -details addr
 run "41_ip_link" ip -details link
 run "42_ip_route" ip -details route
 run "43_ip_rule" ip rule show
 fi
+
 if cmd_exists ss; then
 run "44_listening_tcp_udp" ss -tulpen
 else
 run_shell "44_listening_tcp_udp" 'netstat -tulpen 2>/dev/null || true'
 fi
+
 run_shell "45_resolv_conf" 'safe_cat /etc/resolv.conf'
 run_shell "46_hosts" 'safe_cat /etc/hosts'
 if cmd_exists resolvectl; then run "47_resolvectl" resolvectl status; fi
 if cmd_exists nmcli; then run_shell "48_nmcli" 'nmcli -f all general,device,connection show 2>/dev/null || true'; fi
+
 if [ -d /etc/netplan ]; then
 run_shell "49_netplan" 'ls -la /etc/netplan 2>/dev/null || true; echo; for f in /etc/netplan/*.yaml; do [ -e "$f" ] && echo "----- $f -----" && cat "$f" && echo; done'
 fi
+
 if [ -d /etc/sysconfig/network-scripts ]; then
 run_shell "49_ifcfg" 'ls -la /etc/sysconfig/network-scripts 2>/dev/null || true; echo; for f in /etc/sysconfig/network-scripts/ifcfg-*; do [ -e "$f" ] && echo "----- $f -----" && cat "$f" && echo; done'
 fi
@@ -180,7 +218,9 @@ fi
 # 6x - Usuarios y accesos
 # ------------------------------------------------------------
 
+progress "Relevando usuarios, grupos y sudo"
 log "Usuarios, grupos, sudo, logins..."
+
 run_shell "60_passwd" 'safe_cat /etc/passwd'
 run_shell "61_group" 'safe_cat /etc/group'
 run_shell "62_shadow_hint" 'if [ -r /etc/shadow ]; then echo "OK: /etc/shadow es legible (root)"; else echo "NOACCESS: /etc/shadow (normal)"; fi'
@@ -193,13 +233,16 @@ if cmd_exists who; then run "66_who" who -a; fi
 # 7x - Servicios y jobs
 # ------------------------------------------------------------
 
+progress "Relevando servicios, timers y cron"
 log "Servicios, timers, jobs..."
+
 if cmd_exists systemctl; then
 run "70_systemd_units" systemctl list-units --all --no-pager
 run "71_systemd_services" systemctl list-unit-files --type=service --no-pager
 run "72_systemd_timers" systemctl list-timers --all --no-pager
 run "73_failed_units" systemctl --failed --no-pager
 fi
+
 run_shell "74_crontab_system" 'ls -la /etc/cron* 2>/dev/null || true; echo; for d in /etc/cron.d /etc/cron.daily /etc/cron.weekly /etc/cron.monthly; do [ -d "$d" ] && echo "== $d ==" && ls -la "$d" && echo; done'
 if cmd_exists crontab; then run_shell "75_crontab_user" 'crontab -l 2>/dev/null || true'; fi
 
@@ -207,7 +250,9 @@ if cmd_exists crontab; then run_shell "75_crontab_user" 'crontab -l 2>/dev/null 
 # 8x - Seguridad (SSH, firewall, MAC)
 # ------------------------------------------------------------
 
+progress "Relevando seguridad (SSH, firewall, SELinux/AppArmor)"
 log "Seguridad: SSH, firewall, SELinux/AppArmor..."
+
 run_shell "80_sshd_config" 'safe_cat /etc/ssh/sshd_config; echo; if [ -d /etc/ssh/sshd_config.d ]; then ls -la /etc/ssh/sshd_config.d; echo; for f in /etc/ssh/sshd_config.d/*; do [ -e "$f" ] && echo "----- $f -----" && cat "$f" && echo; done; fi'
 if cmd_exists ssh-keygen; then run_shell "81_ssh_hostkeys_fpr" 'for k in /etc/ssh/ssh_host_*_key.pub; do [ -e "$k" ] && echo "$k" && ssh-keygen -lf "$k" && echo; done'; fi
 if cmd_exists ufw; then run_shell "82_ufw" 'ufw status verbose 2>&1 || true'; fi
@@ -221,7 +266,9 @@ if cmd_exists aa-status; then run_shell "87_apparmor" 'aa-status 2>/dev/null || 
 # 9x - Logs (si accesibles)
 # ------------------------------------------------------------
 
+progress "Relevando logs de autenticacion"
 log "Logs de autenticacion (si accesible)..."
+
 if [ -r /var/log/auth.log ]; then run_shell "90_auth_log_tail" 'tail -n 200 /var/log/auth.log'; fi
 if [ -r /var/log/secure ]; then run_shell "90_secure_log_tail" 'tail -n 200 /var/log/secure'; fi
 if cmd_exists journalctl; then run_shell "91_journal_ssh" 'journalctl -n 300 --no-pager -u ssh 2>/dev/null || true'; fi
@@ -230,7 +277,9 @@ if cmd_exists journalctl; then run_shell "91_journal_ssh" 'journalctl -n 300 --n
 # 10x - Inventario de software
 # ------------------------------------------------------------
 
+progress "Relevando software, repos y updates"
 log "Inventario de software..."
+
 if [ "$PKG" = "apt" ]; then
 run_shell "100_apt_sources" 'ls -la /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null || true; echo; safe_cat /etc/apt/sources.list; echo; for f in /etc/apt/sources.list.d/*; do [ -e "$f" ] && echo "----- $f -----" && cat "$f" && echo; done'
 run_shell "101_pkgs_dpkg" 'dpkg-query -W -f="${binary:Package}\t${Version}\t${Architecture}\n" 2>/dev/null | sort'
@@ -247,6 +296,7 @@ run_shell "103_updates" 'yum check-update 2>/dev/null || true'
 else
 run_shell "100_pkgmgr" 'echo "No se detecto apt/dnf/yum"'
 fi
+
 if cmd_exists snap; then run_shell "110_snap_list" 'snap list 2>/dev/null || true'; fi
 if cmd_exists flatpak; then run_shell "111_flatpak_list" 'flatpak list 2>/dev/null || true'; fi
 if cmd_exists pip; then run_shell "112_pip_freeze" 'pip freeze 2>/dev/null || true'; fi
@@ -256,7 +306,9 @@ if cmd_exists pip3; then run_shell "112_pip3_freeze" 'pip3 freeze 2>/dev/null ||
 # 12x - Runtime
 # ------------------------------------------------------------
 
+progress "Relevando runtime (procesos y dmesg)"
 log "Procesos y estado runtime..."
+
 run_shell "120_ps" 'ps auxfww 2>/dev/null || ps -ef 2>/dev/null || true'
 if cmd_exists top; then run_shell "121_top" 'top -b -n 1 2>/dev/null || true'; fi
 if cmd_exists dmesg; then run_shell "122_dmesg_tail" 'dmesg -T 2>/dev/null | tail -n 200 || dmesg 2>/dev/null | tail -n 200 || true'; fi
@@ -265,6 +317,7 @@ if cmd_exists dmesg; then run_shell "122_dmesg_tail" 'dmesg -T 2>/dev/null | tai
 # HTML
 # ------------------------------------------------------------
 
+progress "Generando reporte HTML"
 log "Armando HTML..."
 
 html_escape(){
@@ -301,19 +354,17 @@ echo "</body></html>"
 # Compresion final (ZIP preferido, TAR.GZ fallback)
 # ------------------------------------------------------------
 
+progress "Empaquetando resultados (zip o tar.gz)"
 log "Comprimiendo salida..."
 
-# Nombre base del archivo comprimido (en el directorio padre del OUTDIR)
 PARENT_DIR="$(cd "$(dirname "$OUTDIR")" && pwd)"
 BASE_DIR="$(basename "$OUTDIR")"
 
 ARCHIVE_ZIP="${PARENT_DIR}/${BASE_DIR}.zip"
 ARCHIVE_TGZ="${PARENT_DIR}/${BASE_DIR}.tar.gz"
 
-# Evita que queden archivos viejos si se re-ejecuta
 rm -f "$ARCHIVE_ZIP" "$ARCHIVE_TGZ" 2>/dev/null || true
 
-# ZIP si existe; sino TAR.GZ (tar + gzip suele venir siempre)
 if cmd_exists zip; then
 run_shell "200_archive_zip" "cd \"${PARENT_DIR}\" && zip -r -q \"${ARCHIVE_ZIP}\" \"${BASE_DIR}\" && echo \"OK: ${ARCHIVE_ZIP}\""
 ARCHIVE_FINAL="$ARCHIVE_ZIP"
@@ -329,16 +380,14 @@ fi
 # Cierre
 # ------------------------------------------------------------
 
+progress "Finalizado"
+progress_done
+
 log "Listo. Reporte TXT: $TXT"
 log "Listo. Reporte HTML: $HTML"
 log "Evidencias: $DATADIR"
 
+echo "OK: $OUTDIR"
 if [ -n "${ARCHIVE_FINAL:-}" ]; then
-log "Archivo final: $ARCHIVE_FINAL"
-echo
-echo "OK: $OUTDIR"
 echo "ARCHIVE: $ARCHIVE_FINAL"
-else
-echo
-echo "OK: $OUTDIR"
 fi
