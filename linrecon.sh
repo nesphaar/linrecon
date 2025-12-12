@@ -7,10 +7,33 @@ shopt -s nullglob
 # - Compatible: Debian/Ubuntu (apt) y RHEL/Fedora (dnf/yum)
 # - Output: TXT + HTML + evidencias por seccion (data/*.txt)
 # - Read-only: no modifica configuracion, solo consulta
-# - Recomendado: correr como root para mayor cobertura
+# - Recomendado: requiere root para mayor cobertura
 # - Al final: comprime todo en .zip (si existe) o .tar.gz (fallback)
 # - Progreso: muestra % y se pisa en la misma linea
+# - Post: ajusta ownership/permisos al usuario que lo ejecuto originalmente
 # ------------------------------------------------------------
+
+# ------------------------------------------------------------
+# Identificar usuario original (antes de auto-elevacion)
+# - Si se lanza con sudo, SUDO_USER existe y es el usuario real
+# - Si no, el usuario real es el actual (id -un)
+# ------------------------------------------------------------
+
+ORIG_USER="${SUDO_USER:-$(id -un)}"
+ORIG_GROUP="$(id -gn "$ORIG_USER" 2>/dev/null || echo "$ORIG_USER")"
+
+# ------------------------------------------------------------
+# Auto-elevacion: si no somos root, pedir sudo y relanzar
+# Preservamos ORIG_USER/ORIG_GROUP para usar al final
+# ------------------------------------------------------------
+
+if [ "$(id -u)" -ne 0 ]; then
+echo "[INFO] Se requieren privilegios de superusuario para el relevamiento completo."
+echo "[INFO] Solicitando sudo..."
+
+export ORIG_USER ORIG_GROUP
+exec sudo -E bash "$0" "$@"
+fi
 
 PROG="linrecon"
 TS="$(date +%Y%m%d_%H%M%S)"
@@ -23,12 +46,10 @@ TXT="$OUTDIR/report.txt"
 umask 077
 mkdir -p "$DATADIR"
 
-is_root=0
-if [ "${EUID:-$(id -u)}" -eq 0 ]; then is_root=1; fi
+is_root=1
 
 # ------------------------------------------------------------
 # Progreso (se pisa)
-# Ajusta TOTAL_STEPS si agregas o sacas progress()
 # ------------------------------------------------------------
 
 TOTAL_STEPS=12
@@ -49,9 +70,7 @@ printf "\n" >&2
 # Helpers
 # ------------------------------------------------------------
 
-# log(): solo al TXT para no interferir con la linea de progreso
 log(){ echo "[$(date +%F' '%T)] $*" >> "$TXT"; }
-
 cmd_exists(){ command -v "$1" >/dev/null 2>&1; }
 
 safe_cat(){
@@ -127,7 +146,8 @@ echo "==== $PROG report ($TS) ====" > "$TXT"
 echo "Host: $HOST" >> "$TXT"
 echo "OS: $OS_NAME ($OS_ID) $OS_VER" >> "$TXT"
 echo "Family: $FAMILY PackageMgr: $PKG" >> "$TXT"
-echo "User: $(id -un 2>/dev/null || true) UID: $(id -u 2>/dev/null || true) Root: $is_root" >> "$TXT"
+echo "User (orig): $ORIG_USER Group (orig): $ORIG_GROUP" >> "$TXT"
+echo "User (effective): $(id -un 2>/dev/null || true) UID: $(id -u 2>/dev/null || true)" >> "$TXT"
 echo "Out: $OUTDIR" >> "$TXT"
 echo >> "$TXT"
 
@@ -163,11 +183,7 @@ run "16_mount" mount
 run_shell "17_fstab" 'safe_cat /etc/fstab'
 if cmd_exists lspci; then run "18_lspci" lspci -nn; fi
 if cmd_exists lsusb; then run "19_lsusb" lsusb; fi
-if [ "$is_root" -eq 1 ] && cmd_exists dmidecode; then
-run "20_dmidecode" dmidecode -t system -t baseboard -t bios -t chassis
-else
-run_shell "20_dmidecode" 'echo "TIP: ejecutar como root e instalar dmidecode para inventario DMI (serial/model/BIOS)."'
-fi
+if cmd_exists dmidecode; then run "20_dmidecode" dmidecode -t system -t baseboard -t bios -t chassis; fi
 
 # ------------------------------------------------------------
 # 3x - Kernel y tuning
@@ -205,14 +221,8 @@ run_shell "45_resolv_conf" 'safe_cat /etc/resolv.conf'
 run_shell "46_hosts" 'safe_cat /etc/hosts'
 if cmd_exists resolvectl; then run "47_resolvectl" resolvectl status; fi
 if cmd_exists nmcli; then run_shell "48_nmcli" 'nmcli -f all general,device,connection show 2>/dev/null || true'; fi
-
-if [ -d /etc/netplan ]; then
-run_shell "49_netplan" 'ls -la /etc/netplan 2>/dev/null || true; echo; for f in /etc/netplan/*.yaml; do [ -e "$f" ] && echo "----- $f -----" && cat "$f" && echo; done'
-fi
-
-if [ -d /etc/sysconfig/network-scripts ]; then
-run_shell "49_ifcfg" 'ls -la /etc/sysconfig/network-scripts 2>/dev/null || true; echo; for f in /etc/sysconfig/network-scripts/ifcfg-*; do [ -e "$f" ] && echo "----- $f -----" && cat "$f" && echo; done'
-fi
+if [ -d /etc/netplan ]; then run_shell "49_netplan" 'ls -la /etc/netplan 2>/dev/null || true; echo; for f in /etc/netplan/*.yaml; do [ -e "$f" ] && echo "----- $f -----" && cat "$f" && echo; done'; fi
+if [ -d /etc/sysconfig/network-scripts ]; then run_shell "49_ifcfg" 'ls -la /etc/sysconfig/network-scripts 2>/dev/null || true; echo; for f in /etc/sysconfig/network-scripts/ifcfg-*; do [ -e "$f" ] && echo "----- $f -----" && cat "$f" && echo; done'; fi
 
 # ------------------------------------------------------------
 # 6x - Usuarios y accesos
@@ -247,10 +257,10 @@ run_shell "74_crontab_system" 'ls -la /etc/cron* 2>/dev/null || true; echo; for 
 if cmd_exists crontab; then run_shell "75_crontab_user" 'crontab -l 2>/dev/null || true'; fi
 
 # ------------------------------------------------------------
-# 8x - Seguridad (SSH, firewall, MAC)
+# 8x - Seguridad
 # ------------------------------------------------------------
 
-progress "Relevando seguridad (SSH, firewall, SELinux/AppArmor)"
+progress "Relevando seguridad (SSH, firewall, MAC)"
 log "Seguridad: SSH, firewall, SELinux/AppArmor..."
 
 run_shell "80_sshd_config" 'safe_cat /etc/ssh/sshd_config; echo; if [ -d /etc/ssh/sshd_config.d ]; then ls -la /etc/ssh/sshd_config.d; echo; for f in /etc/ssh/sshd_config.d/*; do [ -e "$f" ] && echo "----- $f -----" && cat "$f" && echo; done; fi'
@@ -263,18 +273,18 @@ if cmd_exists getenforce; then run_shell "86_selinux" 'getenforce; echo; sestatu
 if cmd_exists aa-status; then run_shell "87_apparmor" 'aa-status 2>/dev/null || true'; fi
 
 # ------------------------------------------------------------
-# 9x - Logs (si accesibles)
+# 9x - Logs
 # ------------------------------------------------------------
 
 progress "Relevando logs de autenticacion"
-log "Logs de autenticacion (si accesible)..."
+log "Logs de autenticacion..."
 
 if [ -r /var/log/auth.log ]; then run_shell "90_auth_log_tail" 'tail -n 200 /var/log/auth.log'; fi
 if [ -r /var/log/secure ]; then run_shell "90_secure_log_tail" 'tail -n 200 /var/log/secure'; fi
 if cmd_exists journalctl; then run_shell "91_journal_ssh" 'journalctl -n 300 --no-pager -u ssh 2>/dev/null || true'; fi
 
 # ------------------------------------------------------------
-# 10x - Inventario de software
+# 10x - Software
 # ------------------------------------------------------------
 
 progress "Relevando software, repos y updates"
@@ -303,26 +313,13 @@ if cmd_exists pip; then run_shell "112_pip_freeze" 'pip freeze 2>/dev/null || tr
 if cmd_exists pip3; then run_shell "112_pip3_freeze" 'pip3 freeze 2>/dev/null || true'; fi
 
 # ------------------------------------------------------------
-# 12x - Runtime
-# ------------------------------------------------------------
-
-progress "Relevando runtime (procesos y dmesg)"
-log "Procesos y estado runtime..."
-
-run_shell "120_ps" 'ps auxfww 2>/dev/null || ps -ef 2>/dev/null || true'
-if cmd_exists top; then run_shell "121_top" 'top -b -n 1 2>/dev/null || true'; fi
-if cmd_exists dmesg; then run_shell "122_dmesg_tail" 'dmesg -T 2>/dev/null | tail -n 200 || dmesg 2>/dev/null | tail -n 200 || true'; fi
-
-# ------------------------------------------------------------
 # HTML
 # ------------------------------------------------------------
 
 progress "Generando reporte HTML"
 log "Armando HTML..."
 
-html_escape(){
-sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
-}
+html_escape(){ sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
 
 {
 echo "<!doctype html>"
@@ -332,12 +329,9 @@ echo "<title>${PROG} report - ${HOST} - ${TS}</title>"
 echo "<style>body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:24px}h1{margin:0 0 8px 0}h2{margin-top:22px}pre{white-space:pre-wrap;background:#f6f8fa;border:1px solid #d0d7de;padding:12px;border-radius:8px}code{background:#f6f8fa;padding:2px 6px;border-radius:6px}</style>"
 echo "</head><body>"
 echo "<h1>${PROG} - Inventory & Audit</h1>"
-echo "<p><b>Host:</b> ${HOST}<br><b>Timestamp:</b> ${TS}<br><b>OS:</b> ${OS_NAME} (${OS_ID}) ${OS_VER}<br><b>Family:</b> ${FAMILY} - <b>PkgMgr:</b> ${PKG}<br><b>Root:</b> ${is_root}<br><b>Output:</b> ${OUTDIR}</p>"
+echo "<p><b>Host:</b> ${HOST}<br><b>Timestamp:</b> ${TS}<br><b>OS:</b> ${OS_NAME} (${OS_ID}) ${OS_VER}<br><b>Family:</b> ${FAMILY} - <b>PkgMgr:</b> ${PKG}<br><b>Effective:</b> root<br><b>Original user:</b> ${ORIG_USER}<br><b>Output:</b> ${OUTDIR}</p>"
 echo "<h2>Indice</h2><ul>"
-for f in "$DATADIR"/*.txt; do
-b="$(basename "$f" .txt)"
-echo "<li><a href=\"#${b}\">${b}</a></li>"
-done
+for f in "$DATADIR"/*.txt; do b="$(basename "$f" .txt)"; echo "<li><a href=\"#${b}\">${b}</a></li>"; done
 echo "</ul>"
 for f in "$DATADIR"/*.txt; do
 b="$(basename "$f" .txt)"
@@ -351,7 +345,7 @@ echo "</body></html>"
 } > "$HTML"
 
 # ------------------------------------------------------------
-# Compresion final (ZIP preferido, TAR.GZ fallback)
+# Compresion final
 # ------------------------------------------------------------
 
 progress "Empaquetando resultados (zip o tar.gz)"
@@ -365,6 +359,7 @@ ARCHIVE_TGZ="${PARENT_DIR}/${BASE_DIR}.tar.gz"
 
 rm -f "$ARCHIVE_ZIP" "$ARCHIVE_TGZ" 2>/dev/null || true
 
+ARCHIVE_FINAL=""
 if cmd_exists zip; then
 run_shell "200_archive_zip" "cd \"${PARENT_DIR}\" && zip -r -q \"${ARCHIVE_ZIP}\" \"${BASE_DIR}\" && echo \"OK: ${ARCHIVE_ZIP}\""
 ARCHIVE_FINAL="$ARCHIVE_ZIP"
@@ -373,21 +368,26 @@ run_shell "200_archive_tgz" "cd \"${PARENT_DIR}\" && tar -czf \"${ARCHIVE_TGZ}\"
 ARCHIVE_FINAL="$ARCHIVE_TGZ"
 else
 run_shell "200_archive_none" 'echo "WARNING: no se encontro zip ni tar. No se genero archivo comprimido."'
-ARCHIVE_FINAL=""
 fi
 
 # ------------------------------------------------------------
-# Cierre
+# Post: devolver ownership/permisos al usuario original
 # ------------------------------------------------------------
+
+progress "Aplicando ownership y permisos al usuario original"
+log "Ajustando ownership/permisos para $ORIG_USER:$ORIG_GROUP..."
+
+if [ -n "${ORIG_USER:-}" ] && [ "$ORIG_USER" != "root" ]; then
+chown -R "$ORIG_USER:$ORIG_GROUP" "$OUTDIR" 2>/dev/null || true
+chmod -R u+rwX,go-rwx "$OUTDIR" 2>/dev/null || true
+if [ -n "${ARCHIVE_FINAL:-}" ] && [ -e "$ARCHIVE_FINAL" ]; then
+chown "$ORIG_USER:$ORIG_GROUP" "$ARCHIVE_FINAL" 2>/dev/null || true
+chmod u+rw,go-rwx "$ARCHIVE_FINAL" 2>/dev/null || true
+fi
+fi
 
 progress "Finalizado"
 progress_done
 
-log "Listo. Reporte TXT: $TXT"
-log "Listo. Reporte HTML: $HTML"
-log "Evidencias: $DATADIR"
-
 echo "OK: $OUTDIR"
-if [ -n "${ARCHIVE_FINAL:-}" ]; then
-echo "ARCHIVE: $ARCHIVE_FINAL"
-fi
+if [ -n "${ARCHIVE_FINAL:-}" ]; then echo "ARCHIVE: $ARCHIVE_FINAL"; fi
