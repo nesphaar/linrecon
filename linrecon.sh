@@ -3,6 +3,7 @@
 # linrecon - Linux Recon & Security Inventory
 #
 # Version: 1.0.1
+# Author: Nesphaar
 #
 # Changelog:
 # 1.0.1
