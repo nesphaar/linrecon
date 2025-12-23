@@ -2,10 +2,14 @@
 # ============================================================
 # linrecon - Linux Recon & Security Inventory
 #
-# Version: 1.0.2
+# Version: 1.0.3
 # Author: Nesphaar
 #
 # Changelog:
+# 1.0.3
+# - Add "Automated Findings" section to HTML (severity + evidence links)
+# - Add optional sshd effective config capture via "sshd -T" when available
+#
 # 1.0.2
 # - Add "Execution Summary" block at the top of the HTML report (timing, error count, archive)
 # - Move packaging step before HTML generation so the archive path is included in the summary
@@ -26,7 +30,7 @@
 set -Eeuo pipefail
 shopt -s nullglob
 
-VERSION="1.0.2"
+VERSION="1.0.3"
 PROG="linrecon"
 
 # ------------------------------------------------------------
@@ -307,6 +311,12 @@ progress "Collecting security (SSH/firewall/MAC)"
 log "Collecting security (SSH/firewall/MAC)..."
 
 run_shell "80_sshd_config" 'safe_cat /etc/ssh/sshd_config; echo; if [ -d /etc/ssh/sshd_config.d ]; then ls -la /etc/ssh/sshd_config.d; echo; for f in /etc/ssh/sshd_config.d/*; do [ -e "$f" ] && echo "----- $f -----" && cat "$f" && echo; done; fi'
+
+# Optional: capture effective sshd config (best for automated findings)
+if cmd_exists sshd; then
+  run_shell "88_sshd_effective" 'sshd -T 2>/dev/null || true'
+fi
+
 if cmd_exists ssh-keygen; then run_shell "81_ssh_hostkeys_fpr" 'for k in /etc/ssh/ssh_host_*_key.pub; do [ -e "$k" ] && echo "$k" && ssh-keygen -lf "$k" && echo; done'; fi
 
 if cmd_exists ufw; then run_shell "82_ufw" 'ufw status verbose 2>&1 || true'; fi
@@ -367,7 +377,7 @@ if cmd_exists dmesg; then run_shell "122_dmesg_tail" 'dmesg -T 2>/dev/null | tai
 
 # ------------------------------------------------------------
 # Final packaging (zip preferred, tar.gz fallback)
-# NOTE: moved before HTML generation so the archive path is included in the HTML summary
+# NOTE: kept before HTML generation so the archive path is included in the HTML summary
 # ------------------------------------------------------------
 progress "Packaging results (zip or tar.gz)"
 log "Packaging results..."
@@ -405,6 +415,164 @@ if [ -f "$ERRORS" ]; then
 fi
 
 # ------------------------------------------------------------
+# Automated Findings (simple, evidence-based heuristics)
+# - No guesses: if we cannot determine, mark as UNKNOWN
+# - Evidence links point to sections in the HTML
+# ------------------------------------------------------------
+FINDINGS_HTML=""
+
+add_finding(){
+  local sev="$1"
+  local title="$2"
+  local detail="$3"
+  local evidence="$4"
+  FINDINGS_HTML+="${FINDINGS_HTML}<tr><td><b>${sev}</b></td><td>${title}</td><td>${detail}</td><td>${evidence}</td></tr>"
+}
+
+# Determine SSH effective config via sshd -T if available
+SSH_EFF_FILE="$DATADIR/88_sshd_effective.txt"
+SSH_PASSAUTH="UNKNOWN"
+SSH_ROOTLOGIN="UNKNOWN"
+
+if [ -s "$SSH_EFF_FILE" ]; then
+  SSH_PASSAUTH="$(awk '$1=="passwordauthentication"{print $2; exit}' "$SSH_EFF_FILE" 2>/dev/null || echo UNKNOWN)"
+  SSH_ROOTLOGIN="$(awk '$1=="permitrootlogin"{print $2; exit}' "$SSH_EFF_FILE" 2>/dev/null || echo UNKNOWN)"
+fi
+
+# SSH PasswordAuthentication
+if [ "$SSH_PASSAUTH" = "yes" ]; then
+  add_finding "HIGH" "SSH PasswordAuthentication enabled" "Consider disabling password logins and enforce key-based auth." "<a href=\"#88_sshd_effective\">evidence</a>"
+elif [ "$SSH_PASSAUTH" = "no" ]; then
+  add_finding "OK" "SSH PasswordAuthentication disabled" "Key-based auth likely enforced (good)." "<a href=\"#88_sshd_effective\">evidence</a>"
+else
+  add_finding "INFO" "SSH PasswordAuthentication unknown" "Could not determine effective SSH setting (sshd -T missing or unavailable)." "<a href=\"#80_sshd_config\">evidence</a>"
+fi
+
+# SSH PermitRootLogin
+if [ "$SSH_ROOTLOGIN" = "yes" ]; then
+  add_finding "HIGH" "SSH PermitRootLogin enabled" "Direct root SSH login is risky. Use sudo with named accounts." "<a href=\"#88_sshd_effective\">evidence</a>"
+elif [ "$SSH_ROOTLOGIN" = "no" ]; then
+  add_finding "OK" "SSH PermitRootLogin disabled" "Direct root SSH login not allowed (good)." "<a href=\"#88_sshd_effective\">evidence</a>"
+elif [ "$SSH_ROOTLOGIN" = "prohibit-password" ] || [ "$SSH_ROOTLOGIN" = "without-password" ]; then
+  add_finding "MEDIUM" "SSH PermitRootLogin allows keys" "Root login allowed via keys. Consider disabling entirely unless justified." "<a href=\"#88_sshd_effective\">evidence</a>"
+else
+  add_finding "INFO" "SSH PermitRootLogin unknown" "Could not determine effective SSH setting." "<a href=\"#80_sshd_config\">evidence</a>"
+fi
+
+# SSH exposure (0.0.0.0 or ::) on port 22
+SS_FILE="$DATADIR/44_listening_tcp_udp.txt"
+if [ -s "$SS_FILE" ]; then
+  if grep -Eq 'LISTEN.+(0\.0\.0\.0:22|\[::\]:22|:::22)' "$SS_FILE"; then
+    add_finding "MEDIUM" "SSH is listening on all interfaces (port 22)" "If external access is not required, bind to management network or restrict via firewall." "<a href=\"#44_listening_tcp_udp\">evidence</a>"
+  else
+    add_finding "INFO" "SSH exposure not clearly broad" "No direct match for 0.0.0.0:22 or ::22 in listener list." "<a href=\"#44_listening_tcp_udp\">evidence</a>"
+  fi
+else
+  add_finding "INFO" "Listening ports unknown" "Could not parse listening ports output." "<a href=\"#44_listening_tcp_udp\">evidence</a>"
+fi
+
+# Firewall status (ufw or firewalld primary checks)
+UFW_FILE="$DATADIR/82_ufw.txt"
+FWD_FILE="$DATADIR/83_firewalld.txt"
+
+FW_ACTIVE="UNKNOWN"
+FW_EVID="#"
+
+if [ -s "$UFW_FILE" ] && grep -qi 'Status:\s*active' "$UFW_FILE"; then
+  FW_ACTIVE="yes"
+  FW_EVID="<a href=\"#82_ufw\">evidence</a>"
+elif [ -s "$UFW_FILE" ] && grep -qi 'Status:\s*inactive' "$UFW_FILE"; then
+  FW_ACTIVE="no"
+  FW_EVID="<a href=\"#82_ufw\">evidence</a>"
+elif [ -s "$FWD_FILE" ] && head -n 3 "$FWD_FILE" | grep -qi 'running'; then
+  FW_ACTIVE="yes"
+  FW_EVID="<a href=\"#83_firewalld\">evidence</a>"
+fi
+
+if [ "$FW_ACTIVE" = "yes" ]; then
+  add_finding "OK" "Firewall appears active" "A host firewall is enabled (good baseline)." "$FW_EVID"
+elif [ "$FW_ACTIVE" = "no" ]; then
+  add_finding "MEDIUM" "Firewall appears inactive" "Consider enabling a host firewall (ufw/firewalld/nftables) with least privilege rules." "$FW_EVID"
+else
+  add_finding "INFO" "Firewall status unclear" "No clear indication from ufw/firewalld outputs." "<a href=\"#82_ufw\">ufw</a> | <a href=\"#83_firewalld\">firewalld</a> | <a href=\"#84_nft\">nft</a> | <a href=\"#85_iptables\">iptables</a>"
+fi
+
+# SELinux / AppArmor status
+SEL_FILE="$DATADIR/86_selinux.txt"
+AA_FILE="$DATADIR/87_apparmor.txt"
+
+if [ -s "$SEL_FILE" ]; then
+  if head -n 1 "$SEL_FILE" | grep -qi 'Enforcing'; then
+    add_finding "OK" "SELinux Enforcing" "SELinux is enforcing (good baseline for RHEL-like systems)." "<a href=\"#86_selinux\">evidence</a>"
+  elif head -n 1 "$SEL_FILE" | grep -qi 'Permissive'; then
+    add_finding "MEDIUM" "SELinux Permissive" "SELinux is permissive. Consider enforcing if feasible." "<a href=\"#86_selinux\">evidence</a>"
+  else
+    add_finding "MEDIUM" "SELinux not enforcing" "SELinux may be disabled or not enforcing." "<a href=\"#86_selinux\">evidence</a>"
+  fi
+else
+  add_finding "INFO" "SELinux status not available" "SELinux tools not detected or not applicable." "<a href=\"#86_selinux\">evidence</a>"
+fi
+
+if [ -s "$AA_FILE" ]; then
+  if grep -qi 'profiles are in enforce mode' "$AA_FILE"; then
+    add_finding "OK" "AppArmor enforcing profiles" "AppArmor profiles are enforcing (good baseline for Debian/Ubuntu)." "<a href=\"#87_apparmor\">evidence</a>"
+  else
+    add_finding "MEDIUM" "AppArmor not clearly enforcing" "AppArmor output does not confirm enforce mode." "<a href=\"#87_apparmor\">evidence</a>"
+  fi
+else
+  add_finding "INFO" "AppArmor status not available" "AppArmor tools not detected or not applicable." "<a href=\"#87_apparmor\">evidence</a>"
+fi
+
+# Pending updates heuristic
+UPD_SEV="INFO"
+UPD_TITLE="Updates status unclear"
+UPD_DETAIL="Could not determine pending updates from collected outputs."
+UPD_EVID=""
+
+if [ "$PKG" = "apt" ]; then
+  UPD_FILE="$DATADIR/103_updates_sim.txt"
+  if [ -s "$UPD_FILE" ]; then
+    line="$(grep -E '^[0-9]+ upgraded,' "$UPD_FILE" | tail -n 1 || true)"
+    if [ -n "${line:-}" ]; then
+      upgraded="$(echo "$line" | awk '{print $1}' 2>/dev/null || echo 0)"
+      if [ "${upgraded:-0}" != "0" ]; then
+        UPD_SEV="MEDIUM"
+        UPD_TITLE="Pending package upgrades detected (apt simulation)"
+        UPD_DETAIL="Simulated upgrade indicates packages to upgrade. Review patching policy and apply updates."
+        UPD_EVID="<a href=\"#103_updates_sim\">evidence</a>"
+      else
+        UPD_SEV="OK"
+        UPD_TITLE="No pending upgrades detected (apt simulation)"
+        UPD_DETAIL="Simulated upgrade shows 0 upgraded."
+        UPD_EVID="<a href=\"#103_updates_sim\">evidence</a>"
+      fi
+    else
+      UPD_SEV="INFO"
+      UPD_TITLE="Pending upgrades not clearly parsed (apt simulation)"
+      UPD_DETAIL="Could not parse the typical 'X upgraded' line."
+      UPD_EVID="<a href=\"#103_updates_sim\">evidence</a>"
+    fi
+  fi
+elif [ "$PKG" = "dnf" ] || [ "$PKG" = "yum" ]; then
+  UPD_FILE="$DATADIR/103_updates.txt"
+  if [ -s "$UPD_FILE" ]; then
+    if grep -Eqi '(^| )Obsoleting Packages|(^| )Security:|^[A-Za-z0-9_.+-]+[[:space:]]+[0-9]' "$UPD_FILE"; then
+      UPD_SEV="MEDIUM"
+      UPD_TITLE="Pending package updates detected"
+      UPD_DETAIL="Package manager output indicates available updates. Review and patch per policy."
+      UPD_EVID="<a href=\"#103_updates\">evidence</a>"
+    else
+      UPD_SEV="OK"
+      UPD_TITLE="No pending updates clearly detected"
+      UPD_DETAIL="No obvious update candidates found in output (heuristic)."
+      UPD_EVID="<a href=\"#103_updates\">evidence</a>"
+    fi
+  fi
+fi
+
+add_finding "$UPD_SEV" "$UPD_TITLE" "$UPD_DETAIL" "$UPD_EVID"
+
+# ------------------------------------------------------------
 # HTML report generation
 # ------------------------------------------------------------
 progress "Generating HTML report"
@@ -419,7 +587,7 @@ html_escape(){
   echo "<html><head><meta charset=\"utf-8\">"
   echo "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
   echo "<title>${PROG} report - ${HOST} - ${TS}</title>"
-  echo "<style>body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:24px}h1{margin:0 0 8px 0}h2{margin-top:22px}pre{white-space:pre-wrap;background:#f6f8fa;border:1px solid #d0d7de;padding:12px;border-radius:8px}code{background:#f6f8fa;padding:2px 6px;border-radius:6px}</style>"
+  echo "<style>body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:24px}h1{margin:0 0 8px 0}h2{margin-top:22px}pre{white-space:pre-wrap;background:#f6f8fa;border:1px solid #d0d7de;padding:12px;border-radius:8px}code{background:#f6f8fa;padding:2px 6px;border-radius:6px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #d0d7de;padding:8px;text-align:left}th{background:#f6f8fa}</style>"
   echo "</head><body>"
   echo "<h1>${PROG} - Inventory & Audit</h1>"
 
@@ -439,7 +607,18 @@ html_escape(){
   echo "Archive: ${ARCHIVE_FINAL:-N/A}"
   echo "</pre>"
 
+  echo "<h2>Automated Findings</h2>"
+  echo "<table>"
+  echo "<tr><th>Severity</th><th>Finding</th><th>Details</th><th>Evidence</th></tr>"
+  if [ -n "$FINDINGS_HTML" ]; then
+    echo "$FINDINGS_HTML"
+  else
+    echo "<tr><td><b>INFO</b></td><td>No findings generated</td><td>Heuristics did not produce output.</td><td>-</td></tr>"
+  fi
+  echo "</table>"
+
   echo "<p><b>Version:</b> ${VERSION}<br><b>Host:</b> ${HOST}<br><b>Timestamp:</b> ${TS}<br><b>OS:</b> ${OS_NAME} (${OS_ID}) ${OS_VER}<br><b>Family:</b> ${FAMILY} - <b>PkgMgr:</b> ${PKG}<br><b>Original user:</b> ${ORIG_USER}<br><b>Output:</b> ${OUTDIR}</p>"
+
   echo "<h2>Index</h2><ul>"
   for f in "$DATADIR"/*.txt; do
     b="$(basename "$f" .txt)"
