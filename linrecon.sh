@@ -2,10 +2,13 @@
 # ============================================================
 # linrecon - Linux Recon & Security Inventory
 #
-# Version: 1.0.4
+# Version: 1.0.5
 # Author: Nesphaar
 #
 # Changelog:
+# 1.0.5
+# - Add New Findings and Heuristics
+#
 # 1.0.4
 # - Add section 13x - Environment & Permissions (Hardening)
 # - Add section 14x - Living off the Land (LotL) / Post-Exploitation tools
@@ -35,7 +38,7 @@
 set -Eeuo pipefail
 shopt -s nullglob
 
-VERSION="1.0.3"
+VERSION="1.0.5"
 PROG="linrecon"
 
 # ------------------------------------------------------------
@@ -80,7 +83,7 @@ mkdir -p "$DATADIR"
 # Progress (single-line overwrite)
 # IMPORTANT: TOTAL_STEPS must match the number of progress() calls
 # ------------------------------------------------------------
-TOTAL_STEPS=14
+TOTAL_STEPS=16
 CURRENT_STEP=0
 
 progress(){
@@ -464,12 +467,15 @@ fi
 # ------------------------------------------------------------
 FINDINGS_HTML=""
 
+# Update this function to handle colors via CSS classes
 add_finding(){
   local sev="$1"
   local title="$2"
   local detail="$3"
   local evidence="$4"
-  FINDINGS_HTML+="${FINDINGS_HTML}<tr><td><b>${sev}</b></td><td>${title}</td><td>${detail}</td><td>${evidence}</td></tr>"
+  # Clean concatenation
+  FINDINGS_HTML+="<tr><td><b class='sev-${sev}'>${sev}</b></td><td>${title}</td><td>${detail}</td><td>${evidence}</td></tr>"
+# FINDINGS_HTML+="${FINDINGS_HTML}<tr><td><b>${sev}</b></td><td>${title}</td><td>${detail}</td><td>${evidence}</td></tr>"
 }
 
 # Determine SSH effective config via sshd -T if available
@@ -613,6 +619,27 @@ elif [ "$PKG" = "dnf" ] || [ "$PKG" = "yum" ]; then
   fi
 fi
 
+# --- New Findings Heuristics ---
+
+# SUID Logic
+SUID_FILE="$DATADIR/131_suid_bins.txt"
+if [ -s "$SUID_FILE" ]; then
+  SUID_COUNT=$(wc -l < "$SUID_FILE")
+  add_finding "MEDIUM" "SUID binaries detected" "Found ${SUID_COUNT} SUID binaries. Review for potential privilege escalation via GTFOBins." "<a href='#131_suid_bins'>evidence</a>"
+fi
+
+# LotL / Dual-use tools Logic
+LOTL_FILE="$DATADIR/140_lotl_inventory.txt"
+if grep -qiE "gcc|g\+\+|nc|socat|nmap" "$LOTL_FILE" 2>/dev/null; then
+  add_finding "INFO" "Post-exploitation tools found" "Compilers or networking tools (nc/socat) are present. Useful for attackers to build or pivot." "<a href='#140_lotl_inventory'>evidence</a>"
+fi
+
+# World-Writable Check
+WW_FILE="$DATADIR/132_world_writable_dirs.txt"
+if [ -s "$WW_FILE" ]; then
+  add_finding "INFO" "World-writable directories" "Common writable paths found. Ensure no sensitive data is stored here." "<a href='#132_world_writable_dirs'>evidence</a>"
+fi
+
 add_finding "$UPD_SEV" "$UPD_TITLE" "$UPD_DETAIL" "$UPD_EVID"
 
 # ------------------------------------------------------------
@@ -630,7 +657,22 @@ html_escape(){
   echo "<html><head><meta charset=\"utf-8\">"
   echo "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
   echo "<title>${PROG} report - ${HOST} - ${TS}</title>"
-  echo "<style>body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:24px}h1{margin:0 0 8px 0}h2{margin-top:22px}pre{white-space:pre-wrap;background:#f6f8fa;border:1px solid #d0d7de;padding:12px;border-radius:8px}code{background:#f6f8fa;padding:2px 6px;border-radius:6px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #d0d7de;padding:8px;text-align:left}th{background:#f6f8fa}</style>"
+# echo "<style>body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:24px}h1{margin:0 0 8px 0}h2{margin-top:22px}pre{white-space:pre-wrap;background:#f6f8fa;border:1px solid #d0d7de;padding:12px;border-radius:8px}code{background:#f6f8fa;padding:2px 6px;border-radius:6px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #d0d7de;padding:8px;text-align:left}th{background:#f6f8fa}</style>"
+  echo "<style>
+  body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:24px}
+  h1{margin:0 0 8px 0}
+  h2{margin-top:22px}
+  pre{white-space:pre-wrap;background:#f6f8fa;border:1px solid #d0d7de;padding:12px;border-radius:8px}
+  code{background:#f6f8fa;padding:2px 6px;border-radius:6px}
+  table{border-collapse:collapse;width:100%}
+  th,td{border:1px solid #d0d7de;padding:8px;text-align:left}
+  th{background:#f6f8fa}
+  /* Severity Colors */
+  .sev-HIGH{background:#ffebe9;color:#cf222e;padding:2px 6px;border-radius:4px}
+  .sev-MEDIUM{background:#fff8c5;color:#9a6700;padding:2px 6px;border-radius:4px}
+  .sev-OK{background:#dafbe1;color:#1a7f37;padding:2px 6px;border-radius:4px}
+  .sev-INFO{background:#ddf4ff;color:#0969da;padding:2px 6px;border-radius:4px}
+  </style>"
   echo "</head><body>"
   echo "<h1>${PROG} - Inventory & Audit</h1>"
 
