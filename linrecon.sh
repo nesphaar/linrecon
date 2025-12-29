@@ -2,10 +2,15 @@
 # ============================================================
 # linrecon - Linux Recon & Security Inventory
 #
-# Version: 1.0.3
+# Version: 1.0.4
 # Author: Nesphaar
 #
 # Changelog:
+# 1.0.4
+# - Add section 13x - Environment & Permissions (Hardening)
+# - Add section 14x - Living off the Land (LotL) / Post-Exploitation tools
+# - Add CSS to Findings HTML
+#
 # 1.0.3
 # - Add "Automated Findings" section to HTML (severity + evidence links)
 # - Add optional sshd effective config capture via "sshd -T" when available
