@@ -376,6 +376,44 @@ if cmd_exists top; then run_shell "121_top" 'top -b -n 1 2>/dev/null || true'; f
 if cmd_exists dmesg; then run_shell "122_dmesg_tail" 'dmesg -T 2>/dev/null | tail -n 200 || dmesg 2>/dev/null | tail -n 200 || true'; fi
 
 # ------------------------------------------------------------
+# 13x - Environment & Permissions (Hardening)
+# ------------------------------------------------------------
+progress "Checking virtualization & SUID"
+log "Checking environment and permissions..."
+
+# Detect virtualization or containerization
+if cmd_exists systemd-detect-virt; then
+  run "130_virt_type" systemd-detect-virt
+else
+  run_shell "130_virt_type" 'grep -iq docker /proc/1/cgroup && echo "docker" || echo "unknown/bare-metal"'
+fi
+
+# Find top SUID binaries (limited to 20 to keep report clean)
+run_shell "131_suid_bins" 'find /usr/bin /usr/sbin -xdev -type f -perm -4000 2>/dev/null | head -n 20'
+
+# Find world-writable directories (potential for persistence/temp storage)
+run_shell "132_world_writable_dirs" 'find /tmp /var/tmp /dev/shm -xdev -type d -perm -0002 2>/dev/null'
+
+# ------------------------------------------------------------
+# 14x - Living off the Land (LotL) / Post-Exploitation tools
+# ------------------------------------------------------------
+progress "Identifying LotL binaries"
+log "Checking for dual-use tools..."
+
+lotl_tools=("nc" "netcat" "nmap" "socat" "python" "python3" "perl" "ruby" "gcc" "g++" "curl" "wget" "tcpdump" "wireshark" "tshark")
+LOTL_OUT="$DATADIR/140_lotl_inventory.txt"
+{
+  echo "### 140_lotl_inventory"
+  echo "# Common tools often used for pivoting or exfiltration"
+  echo
+  for tool in "${lotl_tools[@]}"; do
+    if cmd_exists "$tool"; then
+      echo "[FOUND] $tool: $(command -v "$tool")"
+    fi
+  done
+} > "$LOTL_OUT"
+
+# ------------------------------------------------------------
 # Final packaging (zip preferred, tar.gz fallback)
 # NOTE: kept before HTML generation so the archive path is included in the HTML summary
 # ------------------------------------------------------------
