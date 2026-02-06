@@ -6,65 +6,65 @@ It collects system, network, user, service, and security posture data, correlate
 
 ## ✨ Key Features
 
-🔍 Comprehensive Linux reconnaissance
+- 🔍 Comprehensive Linux reconnaissance
 
-📊 Automated security findings with severity levels
+- 📊 Automated security findings with severity levels
 
-🧾 HTML & TXT reports with indexed evidence
+- 🧾 HTML & TXT reports with indexed evidence
 
-⚙️ Non-intrusive & read-only data collection
+- ⚙️ Non-intrusive & read-only data collection
 
-🧠 Practical heuristics (no guessing, evidence-based)
+- 🧠 Practical heuristics (no guessing, evidence-based)
 
-📦 Automatic report packaging (ZIP / TAR.GZ)
+- 📦 Automatic report packaging (ZIP / TAR.GZ)
 
 ## 🧠 What linrecon Collects
 
 **🖥️ System & Hardware**
 
-OS release, kernel, uptime
+- OS release, kernel, uptime
 
-CPU, memory, disks, mounts
+- CPU, memory, disks, mounts
 
-Virtualization/container detection
+- Virtualization/container detection
 
-BIOS & DMI info (when available)
+- BIOS & DMI info (when available)
 
 **🌐 Networking**
 
-Interfaces, routes, rules
+- Interfaces, routes, rules
 
-Listening TCP/UDP ports
+- Listening TCP/UDP ports
 
-DNS configuration
+- DNS configuration
 
-NetworkManager / Netplan / ifcfg (where applicable)
+- NetworkManager / Netplan / ifcfg (where applicable)
 
 **👥 Users & Access**
 
-Users, groups, sudoers
+- Users, groups, sudoers
 
-Login history (last, who)
+- Login history (last, who)
 
-SSH configuration & effective settings
+- SSH configuration & effective settings
 
 **⚙️ Services & Jobs**
 
-systemd services, timers, failed units
+- systemd services, timers, failed units
 
-Cron jobs (system & user)
+- Cron jobs (system & user)
 
 **🔐 Security Posture**
 
-SSH hardening checks
+- SSH hardening checks
 
-Firewall status (ufw / firewalld / nftables / iptables)
+- Firewall status (ufw / firewalld / nftables / iptables)
 
-SELinux / AppArmor status
+- SELinux / AppArmor status
 
-SUID binaries
+- SUID binaries
 
-World-writable directories
+- World-writable directories
 
 **🧰 Living off the Land (LotL)**
 
@@ -74,47 +74,47 @@ nc, socat, nmap, gcc, python, curl, wget, etc.
 
 **📦 Software Inventory**
 
-Installed packages (apt / yum / dnf)
+- Installed packages (apt / yum / dnf)
 
-Pending updates (heuristic-based)
+- Pending updates (heuristic-based)
 
-Snap, Flatpak, Pip (if present)
+- Snap, Flatpak, Pip (if present)
 
 **🚨 Automated Findings Engine**
 
 linrecon includes built-in heuristics that generate findings with:
 
-🔴 **HIGH**
+- 🔴 **HIGH**
 
-🟠 **MEDIUM**
+- 🟠 **MEDIUM**
 
-🟢 **OK**
+- 🟢 **OK**
 
-🔵 **INFO**
+- 🔵 **INFO**
 
-Each finding:
+**Each finding:**
 
-Is evidence-backed
+- Is evidence-backed
 
-Links directly to the relevant report section
+- Links directly to the relevant report section
 
-Avoids assumptions when data is incomplete
+- Avoids assumptions when data is incomplete
 
-Example findings:
+**Example findings:**
 
-SSH PasswordAuthentication enabled
+- SSH PasswordAuthentication enabled
 
-Root SSH login allowed
+- Root SSH login allowed
 
-SSH exposed on all interfaces
+- SSH exposed on all interfaces
 
-Firewall inactive or unclear
+- Firewall inactive or unclear
 
-Pending system updates
+- Pending system updates
 
-Presence of SUID binaries
+- Presence of SUID binaries
 
-LotL tools detected
+- LotL tools detected
 
 ## 📄 Output Structure
 
