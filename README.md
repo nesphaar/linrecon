@@ -20,7 +20,7 @@ It collects system, network, user, service, and security posture data, correlate
 
 ## 🧠 What linrecon Collects
 
-🖥️ System & Hardware
+**🖥️ System & Hardware**
 
 OS release, kernel, uptime
 
@@ -30,7 +30,7 @@ Virtualization/container detection
 
 BIOS & DMI info (when available)
 
-🌐 Networking
+**🌐 Networking**
 
 Interfaces, routes, rules
 
@@ -40,7 +40,7 @@ DNS configuration
 
 NetworkManager / Netplan / ifcfg (where applicable)
 
-👥 Users & Access
+**👥 Users & Access**
 
 Users, groups, sudoers
 
@@ -48,13 +48,13 @@ Login history (last, who)
 
 SSH configuration & effective settings
 
-⚙️ Services & Jobs
+**⚙️ Services & Jobs**
 
 systemd services, timers, failed units
 
 Cron jobs (system & user)
 
-🔐 Security Posture
+**🔐 Security Posture**
 
 SSH hardening checks
 
@@ -66,13 +66,13 @@ SUID binaries
 
 World-writable directories
 
-🧰 Living off the Land (LotL)
+**🧰 Living off the Land (LotL)**
 
 Detection of common dual-use tools:
 
 nc, socat, nmap, gcc, python, curl, wget, etc.
 
-📦 Software Inventory
+**📦 Software Inventory**
 
 Installed packages (apt / yum / dnf)
 
@@ -80,17 +80,17 @@ Pending updates (heuristic-based)
 
 Snap, Flatpak, Pip (if present)
 
-🚨 Automated Findings Engine
+**🚨 Automated Findings Engine**
 
 linrecon includes built-in heuristics that generate findings with:
-**
-🔴 HIGH
 
-🟠 MEDIUM
+🔴 **HIGH**
 
-🟢 OK
+🟠 **MEDIUM**
 
-🔵 INFO**
+🟢 **OK**
+
+🔵 **INFO**
 
 Each finding:
 
@@ -117,6 +117,7 @@ Presence of SUID binaries
 LotL tools detected
 
 ## 📄 Output Structure
+
 ```
 linrecon_<host>_<timestamp>/
 ├── report.txt        # Full textual report
