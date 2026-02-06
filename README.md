@@ -1,10 +1,10 @@
-🐧 linrecon — Linux Recon & Security Inventory
+## 🐧 linrecon — Linux Recon & Security Inventory
 
-linrecon is a Linux reconnaissance, inventory, and security assessment script designed for security audits, incident response, and post-compromise analysis.
+**linrecon** is a Linux reconnaissance, inventory, and security assessment script designed for security audits, incident response, and post-compromise analysis.
 
 It collects system, network, user, service, and security posture data, correlates it with lightweight heuristics, and produces clean, evidence-backed reports in both TXT and HTML formats.
 
-✨ Key Features
+## ✨ Key Features
 
 🔍 Comprehensive Linux reconnaissance
 
@@ -18,7 +18,8 @@ It collects system, network, user, service, and security posture data, correlate
 
 📦 Automatic report packaging (ZIP / TAR.GZ)
 
-🧠 What linrecon Collects
+## 🧠 What linrecon Collects
+
 🖥️ System & Hardware
 
 OS release, kernel, uptime
@@ -82,14 +83,14 @@ Snap, Flatpak, Pip (if present)
 🚨 Automated Findings Engine
 
 linrecon includes built-in heuristics that generate findings with:
-
+**
 🔴 HIGH
 
 🟠 MEDIUM
 
 🟢 OK
 
-🔵 INFO
+🔵 INFO**
 
 Each finding:
 
@@ -115,7 +116,8 @@ Presence of SUID binaries
 
 LotL tools detected
 
-📄 Output Structure
+## 📄 Output Structure
+```
 linrecon_<host>_<timestamp>/
 ├── report.txt        # Full textual report
 ├── report.html       # Interactive HTML report
@@ -126,30 +128,34 @@ linrecon_<host>_<timestamp>/
     ├── 88_sshd_effective.txt
     ├── 140_lotl_inventory.txt
     └── ...
+```
 
-
-📦 Automatically packaged as:
+## 📦 Automatically packaged as:
 
 .zip (preferred)
 
 .tar.gz (fallback)
 
-🚀 Usage
+## 🚀 Usage
+
+```
 chmod +x linrecon.sh
 ./linrecon.sh
+```
 
+**Optional output directory:**
 
-Optional output directory:
-
+```
 ./linrecon.sh /path/to/output_dir
+```
 
-🔑 Privileges
+## 🔑 Privileges
 
 Automatically re-executes with sudo if not run as root
 
 Preserves original user ownership and permissions
 
-🛡️ Design Principles
+## 🛡️ Design Principles
 
 ✅ Read-only, safe by default
 
@@ -175,13 +181,14 @@ Preserves original user ownership and permissions
 
 📋 Compliance & hardening reviews
 
-📌 Versioning
+## 📌 Versioning
 
 Current version: 1.0.5
 
 See script header for full changelog.
 
-⚠️ Disclaimer
+## ⚠️ Disclaimer
 
-This tool is intended for authorized security testing and system auditing only.
-Use responsibly and only on systems you own or have explicit permission to assess.
+This tool is intended **only for authorized security testing and system auditing**.
+
+Run it **only on systems you own** or where you have **explicit permission** to perform an assessment.
