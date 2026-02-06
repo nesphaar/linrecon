@@ -6,17 +6,17 @@ It collects system, network, user, service, and security posture data, correlate
 
 ## ✨ Key Features
 
-- 🔍 Comprehensive Linux reconnaissance
+🔍 Comprehensive Linux reconnaissance
 
-- 📊 Automated security findings with severity levels
+📊 Automated security findings with severity levels
 
-- 🧾 HTML & TXT reports with indexed evidence
+🧾 HTML & TXT reports with indexed evidence
 
-- ⚙️ Non-intrusive & read-only data collection
+⚙️ Non-intrusive & read-only data collection
 
-- 🧠 Practical heuristics (no guessing, evidence-based)
+🧠 Practical heuristics (no guessing, evidence-based)
 
-- 📦 Automatic report packaging (ZIP / TAR.GZ)
+📦 Automatic report packaging (ZIP / TAR.GZ)
 
 ## 🧠 What linrecon Collects
 
